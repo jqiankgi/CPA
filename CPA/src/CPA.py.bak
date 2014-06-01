@@ -1,0 +1,517 @@
+#-------------------------------------------------------------------------------
+# Name:        CPA primer design
+# Purpose: to generate right CPA primer sets
+#
+# Author:      jifeng
+#
+# Created:     1/14/2013
+# Copyright:   (c) jifeng 2013
+
+#-------------------------------------------------------------------------------
+from Bio import Entrez, SeqIO
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
+from Bio.Blast import NCBIWWW, NCBIXML
+import MeltingTemp_jf2
+import re
+from  string  import  *
+from xlwt import Workbook
+import xlwt
+import SecStructures_jf8
+import time
+import sys
+import os
+#from xlwt import Workbook
+def main():
+	#CPA(input_filename,snp_file,min_len,max_len,between_len1, min_between_len2, max_between_len2,salt,Mg,oligo,dNTP,min_temp,max_temp,max_DG_self, max_DG5_self, max_DG_eachother, max_DG5_eachother,bool_snp,single_snp,max_snp,bool_human,bad_length,num_bad,output_fname) #filename is fasta format input sequence file. 
+	print "ok"
+def get_parameters(input_filename,primer_length_min, primer_length_max,max_5,min_30,max_70,salt,Mg,oligo,dNTP,minTm,maxTm,maxDG5,maxDG,max_snp,conservation,snp_fname,bool_human,max_human,set_max_snp,set_maxDG,output_fname,bool_closeandfinish):
+	if bool_human:
+		bad_start=check_blast_ex(input_filename,int(max_human)+1)
+	else:
+		bad_start=[]
+	if not bool_conservation:
+		set_max_snp=999999
+		max_snp=999999
+		
+def get_seq(filename,start,end):
+	f=open(filename+'_'+str(start)+'_'+str(end)+'.txt','w')
+	(input_id,input_seq,input_len)=read_fasta(filename)
+	str1=input_seq[start:end]
+	print '>'+'input_id'+'\n'+str1+'\n'
+
+def get_data(model):
+	f=open("taxid9_short.txt").read().split('\n')
+	model.setStringList(f)
+
+def check_blast_ex(input_filename,piece_len,bool_customer,exclude_line):
+	bad_match=set()
+	if bool_customer and exclude_line !='':
+		query_line=exclude_line
+	else:
+		query_line='txid9606 [ORGN]'
+	(input_id,input_seq,input_len)=read_fasta(input_filename)
+	f=open('~seq.txt','w')
+	for i in range(0,input_len-piece_len):
+		print >>f, '>'+str(i)+'\n'+input_seq[i:i+piece_len]	
+	f.close()
+	input_file = open('~seq.txt','r')
+	count_piece=int(os.path.getsize('~seq.txt')/2000)+1
+	typ=''
+	blast_result_file= open('~blastresult.xml',"w")
+	counter_i=0
+	try:
+		for seq_record in SeqIO.parse(input_file, "fasta"):
+			typ=typ+seq_record.format('fasta')
+			if (len(typ)>2000):
+				counter_i=counter_i+1
+				try:
+					print "blasting"
+					result_handle = NCBIWWW.qblast("blastn", "nr", typ,word_size=13,hitlist_size=100,entrez_query=query_line,expect=10)
+					print str(counter_i)+"out of"+str(count_piece)+" is blasted!"
+				except:
+					try:
+						print "mistake happens when tryint to connect to NCBI blast engine, try again!"
+						result_handle = NCBIWWW.qblast("blastn", "nr", typ,word_size=13,hitlist_size=100,entrez_query=query_line,expect=10)
+						print "sucessfully connect to NCBI blast engine at the second try!"
+					except:
+						print "can't use NCBI blast at this moment!"
+						sys.exit(0)
+				t=result_handle.read()
+				blast_result_file.write(t)					
+				typ=''
+		blast_result_file.close()
+		blast_result_file= open('~blastresult.xml',"a")
+		result_handle = NCBIWWW.qblast("blastn", "nr", typ,word_size=13,hitlist_size=100,entrez_query=query_line,expect=10)
+		t2=result_handle.read()
+		blast_result_file.write(t2)
+		blast_result_file.close()
+	except:
+		print "Error happpens while getting the blast result! Unable to use blast this time!"
+		sys.exit(0)
+	try:
+		blast_records = NCBIXML.parse(open('~blastresult.xml')) 
+		for blast_record in blast_records:
+			for alignment in blast_record.alignments:
+				for hsp in alignment.hsps:
+					if hsp.identities == piece_len:
+						bad_match.add(i)
+	except:
+		print "Error happens while parsing blast result"
+		sys.exit(0)
+	input_file.close()
+	return bad_match
+
+
+#def write_title(output_fname):
+#	book = Workbook()
+#	sheet1 = book.add_sheet('Parameter',cell_overwrite_ok=True)
+#	row11 = sheet1.row(0)
+#	row11.write(0,'Input_sequence_file')
+#	row11.write(1,'conservation_check')
+#	row11.write(2,'minimal primer length')
+#	row11.write(3,'maximum primer length')
+#	row11.write(4,'maximum distance between 1st and 2nd primers, 3rd and 4th primers')
+#	row11.write(5,'minimum distance between 2nd and 3rd primers')
+#	row11.write(5,'maximul distance between 2nd and 3rd primers')
+#	row11.write(6,'Salt(mM)')
+#
+
+	
+
+def read_fasta(filename): #read a fasta format file
+    for seq_record in SeqIO.parse(filename, "fasta"):
+        return (str(seq_record.id), str(seq_record.seq),len(str(seq_record.seq)))
+
+def revcomp(dna): # read the reverse complementary complementary
+	comp = dna.translate(maketrans("AGCTagct", "TCGAtcga"))
+	lcomp = list(comp)
+	lcomp.reverse()
+	return  join(lcomp,  "")
+
+class Cal(): # this is for the one single primer for the primer set
+	def __init__(self, qseq, sseq, mono_conc=50, diva_conc=3, oligo_conc=250, dntp_conc=0.00008):
+		deltaH, deltaS = MeltingTemp_jf2.calDeltaHS(qseq, sseq)
+		#self.Tm = MeltingTemp_jf2.calTm(qseq, sseq, mono_conc=mono_conc, diva_conc=diva_conc, oligo_conc=oligo_conc, dntp_conc=dntp_conc,deltaH=deltaH, deltaS=deltaS)
+		self.Tm=MeltingTemp_jf2.Tm_staluc(qseq)
+		self.DeltaG5 = MeltingTemp_jf2.calDeltaG(qseq[-5:], sseq[-5:], mono_conc=mono_conc, Mg_conc=diva_conc, dntp_conc=dntp_conc)	
+		a=Seq(qseq)
+		b=SeqRecord(a)
+		c=SecStructures_jf8.SecStructures(b)	
+		structs=c
+		self.dimer=int(str(structs).split()[0])
+		self.hairpin=int(str(structs).split()[1])
+		
+
+class Cal_set(Cal): # this is for the whole primer set
+	def __init__(self, seq1, seq2,seq3, seq4,mono_conc=50, Mg_conc=3, oligo_conc=250, dntp_conc=0.00008):		
+		seqs=[seq1,seq2,seq3,seq4]
+		dimer_list=[]
+		for s in seqs:
+			for t in seqs:
+				structs = SecStructures_jf8.SecStructures(SeqRecord(Seq(s)),SeqRecord(Seq(t)))
+				dimer=int(str(structs).split()[0])
+				dimer_list.append(dimer)
+		self.max_dimer=max(dimer_list)
+		
+def Struct_piece(min_len, max_len, input_len, input_seq, min_temp,max_temp,max_DG5_self, max_self_dimer, max_hairpin,salt,Mg,oligo,dNTP):
+	print "constructing pieces information"
+	p_ok={}
+	for i in range(min_len,max_len+1):
+		print "pieces lenght equals to", i
+		for j in range(0,input_len-i):
+			p=input_seq[j:j+i]
+			if len(p)>min_len-1:
+				p_cal=Cal(revcomp(p),p,salt,Mg,oligo,dNTP)
+				if p_cal.Tm>=min_temp and p_cal.Tm<=max_temp and p_cal.DeltaG5>=max_DG5_self and p_cal.dimer<max_self_dimer and p_cal.hairpin<max_hairpin:
+					p_ok[(i,j)]=1
+	return p_ok
+
+
+def CPA_run(input_filename,snp_file,min_len,max_len,between_len1, min_between_len2, max_between_len2,salt,Mg,oligo,dNTP,min_temp,max_temp, max_DG5_self, bool_snp,single_snp,set_max_snp,bool_human,bool_customer, exclude_line, bad_length,num_bad,output_fname,max_self_dimer, max_hairpin, max_cross_dimer): #filename is fasta format input sequence file. 
+	print 'start'
+	if bool_human or bool_customer:
+		bad_match=check_blast_ex(input_filename,bad_length,bool_customer,exclude_line)
+		print "finished blast"
+	if bool_snp:
+		lines=open(snp_file).readlines()
+	font = xlwt.Font() # Create Font
+	font.bold = True # Set font to Bold
+	style = xlwt.XFStyle() # Create Style
+	style.font = font # Add Bold Font to Style
+	book = Workbook()
+	sheet1 = book.add_sheet('Parameter',cell_overwrite_ok=True)
+	row11 = sheet1.row(0)
+	row11.write(0,'input_filename',style)
+	row11.write(1,'snp_file',style)
+	row11.write(2,'min_len',style)
+	row11.write(3,'max_len',style)
+	row11.write(4,'between_len1',style)
+	row11.write(5,'min_between_len2',style)
+	row11.write(6,'max_between_len2',style)
+	row11.write(7,'salt',style)
+	row11.write(8,'Mg',style)
+	row11.write(9,'dNTP',style)
+	row11.write(10,'min_temp',style)
+	row11.write(11,'max_temp',style)
+	#row11.write(12,'max_DG_self')
+	row11.write(13,'max_DG5_self',style)
+	#row11.write(14,'max_DG_eachother')
+	row11.write(15,'max_between_len2',style)
+	row11.write(16,'bool_snp',style)
+	row11.write(17,'single_snp',style)
+	row11.write(18,'set_max_snp',style)
+	row11.write(19,'bool_human',style)
+	row11.write(20,'bad_length',style)
+	row11.write(21,'num_bad',style)
+	row11.write(22,'max_self_dimer',style)
+	row11.write(23,'max_hairpin',style)
+	row11.write(24,'max_cross_dimer',style)
+	row11.write(25,'output_fname',style)
+
+	row11 = sheet1.row(1)
+	row11.write(0,input_filename)
+	row11.write(1,snp_file)
+	row11.write(2,min_len)
+	row11.write(3,max_len)
+	row11.write(4,between_len1)
+	row11.write(5,min_between_len2)
+	row11.write(6,max_between_len2)
+	row11.write(7,salt)
+	row11.write(8,Mg)
+	row11.write(9,dNTP)
+	row11.write(10,min_temp)
+	row11.write(11,max_temp)
+	#row11.write(12,max_DG_self)
+	row11.write(13,max_DG5_self)
+	#row11.write(14,max_DG_eachother)
+	row11.write(15,max_between_len2)
+	row11.write(16,bool_snp)
+	row11.write(17,single_snp)
+	row11.write(18,set_max_snp)
+	row11.write(19,bool_human)
+	row11.write(20,bad_length)
+	row11.write(21,num_bad)
+	row11.write(22,max_self_dimer)
+	row11.write(23,max_hairpin)
+	row11.write(24,max_cross_dimer)
+	row11.write(25,output_fname)
+	sheet2 = book.add_sheet('Found Acceptable DNA Target',cell_overwrite_ok=True)
+	sheet2.write_merge(0, 0, 0, 6, 'First piece',style) # Merges row 0's columns 0 through 6
+	sheet2.write_merge(0, 0, 7, 14, 'Second piece',style) # Merges row 0's columns 7 through 14
+	sheet2.write_merge(0, 0, 15, 20, 'Third piece',style) # Merges row 0's columns 15 through 20
+	sheet2.write_merge(0, 0, 21, 27, 'Fourth piece',style) # Merges row 0's columns 21 through 27
+	sheet2.write_merge(0, 0, 28, 30, 'Whole set',style) # Merges row 0's columns 28 through 30
+	row21 = sheet2.row(1)
+	row21.write(0,'start_position',style)
+	row21.write(1,'length',style)
+	row21.write(2,'p1',style)
+	row21.write(3,'Tm',style)
+	row21.write(4,'DeltaG5',style)
+	#row21.write(3,'p1_cal.DeltaG')
+	row21.write(5,'dimer',style)
+	row21.write(6,'hairpin',style)
+	row21.write(7,'start_position',style)
+	row21.write(8,'length',style)
+	row21.write(9,'p2',style)
+	row21.write(10,'Tm',style)
+	row21.write(11,'DeltaG5',style)
+	#row21.write(11,'p2_cal.DeltaG')
+	row21.write(12,'dimer',style)
+	row21.write(13,'hairpin',style)
+	row21.write(14,'start_position',style)
+	row21.write(15,'length',style)
+	row21.write(16,'p3',style)
+	row21.write(17,'Tm',style)
+	row21.write(18,'DeltaG5',style)
+	#row21.write(19,'p3_cal.DeltaG')
+	row21.write(19,'dimer',style)
+	row21.write(20,'hairpin',style)
+	row21.write(21,'start_position',style)
+	row21.write(22,'length',style)
+	row21.write(23,'p4',style)
+	row21.write(24,'Tm',style)
+	row21.write(25,'DeltaG5',style)
+	#row21.write(27,'p4_cal.DeltaG')
+	row21.write(26,'dimer',style)
+	row21.write(27,'hairpin',style)
+	row21.write(28,'Cross_max_dimer',style)
+	row21.write(29,'Total number of SNP',style)
+	row21.write(30,'Number of piece cross react with Human',style)
+	book.save(output_fname)
+	rowi=2
+	#print >>f, "input_filename,snp_file,min_len,max_len,between_len1, min_between_len2, max_between_len2,salt,Mg,oligo,dNTP,min_temp,max_temp,max_DG_self, max_DG5_self, max_DG_eachother, bool_snp,single_snp,set_max_snp,bool_human,bad_length,num_bad,output_fname"
+	#print >>f, input_filename,snp_file,min_len,max_len,between_len1, min_between_len2, max_between_len2,salt,Mg,oligo,dNTP,min_temp,max_temp,max_DG_self, max_DG5_self, max_DG_eachother, bool_snp,single_snp,set_max_snp,bool_human,bad_length,num_bad,output_fname
+	(input_id,input_seq,input_len)=read_fasta(input_filename)
+	#write_title(output_fname)
+	P_ok=Struct_piece(min_len, max_len, input_len, input_seq, min_temp,max_temp,max_DG5_self, max_self_dimer, max_hairpin,salt,Mg,oligo,dNTP)
+	for i in range(min_len,max_len+1):
+		print "i",i
+		for j in range(0,input_len-i):
+			if (i,j) in P_ok:
+				for i2 in range(min_len,max_len+1):
+					for j2 in range(j+i+1,j+i+between_len1+1):
+						if (i2,j2) in P_ok:
+							for i3 in range(min_len,max_len+1):
+								for  j3 in range(j2+i2+min_between_len2+1,j2+i2+max_between_len2+1):
+									if (i3,j3) in P_ok:
+										#for i4 in range(min_len,max_len+1):
+										for i4 in range(min_len,max_len+1):
+											for j4 in range(j3+i3+1,j3+i3+between_len1+1):
+												if (i4,j4) in P_ok:
+													p1=input_seq[j:j+i]
+													p2=input_seq[j2:j2+i2]
+													p3=input_seq[j3:j3+i3]
+													p4=input_seq[j4:j4+i4]
+													p_cal=Cal_set(revcomp(p1),revcomp(p2),revcomp(p3),revcomp(p4),salt,Mg,oligo,dNTP)
+													if p_cal.max_dimer<=max_cross_dimer:
+														p1_cal=Cal(revcomp(p1),p1,salt,Mg,oligo,dNTP)
+														p2_cal=Cal(revcomp(p2),p2,salt,Mg,oligo,dNTP)
+														p3_cal=Cal(revcomp(p3),p3,salt,Mg,oligo,dNTP)
+														p4_cal=Cal(revcomp(p4),p4,salt,Mg,oligo,dNTP)
+														if bool_snp:
+															r=count_snp_set(j,j+i,j2,j2+i2,j3,j3+i3,j4,j4+i4,lines,single_snp,set_max_snp)
+															if r['bool']: #snp check passed
+																if bool_human or bool_customer: #if it's necessary to check for cross reaction
+																	sum_bad=blast_set(j,j+i,j2,j2+i2,j3,j3+i3,j4,j4+i4,bad_match,bad_length)
+																	if sum_bad<=num_bad:#to check how many of the primer is considered to be bad cross-react with human primer, bad_match is a set of bad piece starting point	
+																		row2i=sheet2.row(rowi)
+																		row2i.write(0,revcomp(p1))
+																		row2i.write(1,p1_cal.Tm)
+																		row2i.write(2,p1_cal.DeltaG5)
+																		row2i.write(4,p1_cal.dimer)
+																		row2i.write(5,p1_cal.hairpin)
+																		row2i.write(6,j2)
+																		row2i.write(7,i2)
+																		row2i.write(8,revcomp(p2))
+																		row2i.write(9,p2_cal.Tm)
+																		row2i.write(10, p2_cal.DeltaG5)
+																		row2i.write(12,p2_cal.dimer)
+																		row2i.write(13,p2_cal.hairpin)
+																		row2i.write(14,j3)
+																		row2i.write(15,i3)
+																		row2i.write(16,revcomp(p3))
+																		row2i.write(17,p3_cal.Tm)
+																		row2i.write(18,p3_cal.DeltaG5)
+																		row2i.write(20,p3_cal.dimer)
+																		row2i.write(21,p3_cal.hairpin)
+																		row2i.write(22,j4)
+																		row2i.write(23,i4)
+																		row2i.write(24,revcomp(p4))
+																		row2i.write(25,p4_cal.Tm)
+																		row2i.write(26,p4_cal.DeltaG5)
+																		row2i.write(28,p4_cal.dimer)
+																		row2i.write(29,p4_cal.hairpin)
+																		row2i.write(30,p_cal.max_dimer)
+																		row2i.write(31,r['number'])
+																		row2i.write(32,sum_bad)
+																		rowi=rowi+1	
+																else:
+																	row2i=sheet2.row(rowi)
+																	row2i.write(0,j)
+																	row2i.write(1,i)
+																	row2i.write(2,revcomp(p1))
+																	row2i.write(3,p1_cal.Tm)
+																	row2i.write(4,p1_cal.DeltaG5)
+																	row2i.write(5,p1_cal.dimer)
+																	row2i.write(6,p1_cal.hairpin)
+																	row2i.write(7,j2)
+																	row2i.write(8,i2)
+																	row2i.write(9,revcomp(p2))
+																	row2i.write(10,p2_cal.Tm)
+																	row2i.write(11, p2_cal.DeltaG5)
+																	row2i.write(12,p2_cal.dimer)
+																	row2i.write(13,p2_cal.hairpin)
+																	row2i.write(14,j3)
+																	row2i.write(15,i3)
+																	row2i.write(16,revcomp(p3))
+																	row2i.write(17,p3_cal.Tm)
+																	row2i.write(18,p3_cal.DeltaG5)
+																	row2i.write(20,p3_cal.dimer)
+																	row2i.write(21,p3_cal.hairpin)
+																	row2i.write(22,j4)
+																	row2i.write(23,i4)
+																	row2i.write(24,revcomp(p4))
+																	row2i.write(25,p4_cal.Tm)
+																	row2i.write(26,p4_cal.DeltaG5)
+																	row2i.write(28,p4_cal.dimer)
+																	row2i.write(29,p4_cal.hairpin)
+																	row2i.write(30,p_cal.max_dimer)
+																	row2i.write(31,r['number'])
+																	rowi=rowi+1
+														else: #if it's not necessary to check for conservation
+															if bool_human or bool_customer: #if it's necessary to check for cross reaction
+																sum_bad=blast_set(j,j+i,j2,j2+i2,j3,j3+i3,j4,j4+i4,bad_match,bad_length)
+																if sum_bad<=num_bad:	#to check how many of the primer is considered to be bad cross-react with human primer, bad_match is a set of bad piece starting point
+																	row2i=sheet2.row(rowi)
+																	row2i.write(0,j)
+																	row2i.write(1,i)
+																	row2i.write(2,revcomp(p1))
+																	row2i.write(3,p1_cal.Tm)
+																	row2i.write(4,p1_cal.DeltaG5)
+																	row2i.write(5,p1_cal.dimer)
+																	row2i.write(6,p1_cal.hairpin)
+																	row2i.write(7,j2)
+																	row2i.write(8,i2)
+																	row2i.write(9,revcomp(p2))
+																	row2i.write(10,p2_cal.Tm)
+																	row2i.write(11, p2_cal.DeltaG5)
+																	row2i.write(12,p2_cal.dimer)
+																	row2i.write(13,p2_cal.hairpin)
+																	row2i.write(14,j3)
+																	row2i.write(15,i3)
+																	row2i.write(16,revcomp(p3))
+																	row2i.write(17,p3_cal.Tm)
+																	row2i.write(18,p3_cal.DeltaG5)
+																	row2i.write(19,p3_cal.dimer)
+																	row2i.write(20,p3_cal.hairpin)
+																	row2i.write(21,j4)
+																	row2i.write(22,i4)
+																	row2i.write(23,revcomp(p4))
+																	row2i.write(24,p4_cal.Tm)
+																	row2i.write(25,p4_cal.DeltaG5)
+																	row2i.write(26,p4_cal.dimer)
+																	row2i.write(27,p4_cal.hairpin)
+																	row2i.write(28,p_cal.max_dimer)
+																	row2i.write(29,'')
+																	row2i.write(30,sum_bad)
+																	rowi=rowi+1
+															else:
+																print "I am writing!",i,j,i2,i3,i4
+																row2i=sheet2.row(rowi)
+																row2i.write(0,j)
+																row2i.write(1,i)
+																row2i.write(2,revcomp(p1))
+																row2i.write(3,p1_cal.Tm)
+																row2i.write(4,p1_cal.DeltaG5)
+																row2i.write(5,p1_cal.dimer)
+																row2i.write(6,p1_cal.hairpin)
+																row2i.write(7,j2)
+																row2i.write(8,i2)
+																row2i.write(9,revcomp(p2))
+																row2i.write(10,p2_cal.Tm)
+																row2i.write(11, p2_cal.DeltaG5)
+																row2i.write(12,p2_cal.dimer)
+																row2i.write(13,p2_cal.hairpin)
+																row2i.write(14,j3)
+																row2i.write(15,i3)
+																row2i.write(16,revcomp(p3))
+																row2i.write(17,p3_cal.Tm)
+																row2i.write(18,p3_cal.DeltaG5)
+																row2i.write(19,p3_cal.dimer)
+																row2i.write(20,p3_cal.hairpin)
+																row2i.write(21,j4)
+																row2i.write(22,i4)
+																row2i.write(23,revcomp(p4))
+																row2i.write(24,p4_cal.Tm)
+																row2i.write(25,p4_cal.DeltaG5)
+																row2i.write(26,p4_cal.dimer)
+																row2i.write(27,p4_cal.hairpin)
+																row2i.write(28,p_cal.max_dimer)
+																rowi=rowi+1
+	book.save(output_fname)
+	print "Done!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	sys.exit()
+
+def count_snp_set(start_pos1,end_pos1,start_pos2,end_pos2,start_pos3,end_pos3,start_pos4,end_pos4,lines,single_snp,sum_snp): # this is for calculating the single nucleotide polymorphism detection based on the output of another file from Bioedit
+	t={} # store the result
+	snp1=count_snp(start_pos1,end_pos1,lines)
+	snp2=count_snp(start_pos2,end_pos2,lines)
+	snp3=count_snp(start_pos3,end_pos3,lines)
+	snp4=count_snp(start_pos4,end_pos4,lines)
+	sum=snp1+snp2+snp3+snp4
+	if snp1<=single_snp and snp2<=single_snp and snp3<=single_snp and snp4<=single_snp and (sum<sum_snp):
+		t['bool']='true'
+		t['number']=sum
+		return t
+	else:
+		t['bool']='false'
+		t['number']=sum
+		return t
+
+
+def blast_set(start_pos1,end_pos1,start_pos2,end_pos2,start_pos3,end_pos3,start_pos4,end_pos4,bad_match,bad_length,num_bad):#to check how many of the primer is considered to be bad cross-react with human primer, bad_match is a set of bad piece starting point
+	sum_bad=int(count_blast(start_pos1, end_pos1, bad_match,bad_length)+int(count_blast(start_pos2, end_pos2, bad_match,bad_length))+int(count_blast(start_pos3, end_pos3, bad_match,bad_length))+int(count_blast(start_pos4, end_pos4, bad_match,bad_length)))
+	return sum_bad
+	
+	
+
+def count_blast (start_pos, end_pos, bad_match,bad_length):
+	if end_pos-start_pos<bad_length:
+		return true
+	else:
+		for i in range(start_pos,end_pos-bad_length):
+			if i in bad_match:
+				return false
+		return true
+	
+	
+	
+
+def count_snp(start_pos,end_pos,lines):
+	p = re.compile('[A-Z]')
+	snp=[]
+	for line in lines:
+		snp=snp+[m.start() for m in p.finditer(line[start_pos:end_pos])]
+		#print len(list(set([m.start() for m in p.finditer(line[start_pos:end_pos])]))),
+	return len(list(set(snp)))
+
+
+def main():
+	p2='GGGGGGGGGGGGGG'
+	p2_cal=Cal(p2,revcomp(p2))
+	print p2_cal.DeltaG5, p2_cal.DeltaG
+	print revcomp(p2)
+
+
+	p2='GCTGCTTCTGACATATTAAGAATA'
+	p2_cal=Cal(p2,p2)
+	print p2_cal.DeltaG5, p2_cal.DeltaG
+	print revcomp(p2)
+
+if __name__ == '__main__':
+	p_cal=Cal('GATCTGATGCATGAGATCGCATCAGATC','AGAGTTGGTAGAAAGGTGGA',50,3,250,0.00008)
+	print 'p_cal, Tm, hairpin', p_cal.Tm, p_cal.hairpin
+	print type(p_cal.Tm)
+	p_cal=Cal(revcomp('AGAGTTGGTAGAAAGGTGGA'),'AGAGTTGGTAGAAAGGTGGA',50,3,250,0.00008)
+	print 'p_cal2, Tm', p_cal.Tm	
